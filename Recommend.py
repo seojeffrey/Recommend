@@ -47,7 +47,7 @@ class Recommend(StoredRedis):
         target_list = list()
         last_score = score
         with cls.pipeline(transaction=False) as pipe:
-            for _ in [0, 1, 3, 6, 9]:  # 동시간인경우 2명일수도있다
+            for _ in [0, 1, 3, 6, 9]:
                 pipe.zrangebyscore(cls.key % (country, ), last_score - _, last_score,
                                    start=0, num=amount * 2) or list()
                 target = pipe.execute()
@@ -55,7 +55,7 @@ class Recommend(StoredRedis):
                 last_score = last_score - _
                 if not target:
                     continue
-
+                # 동 시간인경우 인원이 중복 될 수도 있다, transaction 을 사용하지 않기에 set 사용하여 중복제거
                 target_list = list(set(target_list + target))
                 if len(target_list) > amount:
                     break
@@ -67,6 +67,10 @@ class Recommend(StoredRedis):
                 for _ in target_list:
                     pipe.zadd(cls.key % (country, ), score, _)
                 pipe.execute()
+        # max 가 이미 넘친다면 제거
+        if len(target_list) > amount:
+            cls.flush_score(country, score-10)
+
         return target_list
 
     @classmethod
@@ -80,9 +84,10 @@ class Recommend(StoredRedis):
         cls.zrem(cls.key % (country,), object_id)
 
     @classmethod
-    def flush_score(cls, country, score_min, score_max):
+    def flush_score(cls, country, score_min, score_max=-1):
         """
         검색 대상에서 제거 할 시간 Base score
+        필요에따라 사용
         :param country: 국가별
         :param score_min: 제거 할 시간 Base score min
         :param score_max: 제거 할 시간 Base score max
